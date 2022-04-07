@@ -16,6 +16,8 @@ module ShopifyAPI
       @paths = T.let([], T::Array[T::Hash[Symbol, T.any(T::Array[Symbol], String, Symbol)]])
       @custom_prefix = T.let(nil, T.nilable(String))
 
+      @aliased_properties = T.let({}, T::Hash[String, String])
+
       sig { returns(T::Hash[Symbol, T.untyped]) }
       attr_accessor :original_state
 
@@ -32,6 +34,7 @@ module ShopifyAPI
         @original_state = T.let({}, T::Hash[Symbol, T.untyped])
         @custom_prefix = T.let(nil, T.nilable(String))
         @forced_nils = T.let({}, T::Hash[String, T::Boolean])
+        @aliased_properties = T.let({}, T::Hash[String, String])
 
         session ||= ShopifyAPI::Context.active_session
 
@@ -42,7 +45,7 @@ module ShopifyAPI
         @errors = T.let(Rest::BaseErrors.new, Rest::BaseErrors)
 
         from_hash&.each do |key, value|
-          instance_variable_set("@#{key}", value)
+          set_property(key, value)
         end
       end
 
@@ -235,13 +238,13 @@ module ShopifyAPI
       def method_missing(meth_id, val = nil)
         match = meth_id.id2name.match(/([^=]+)(=)?/)
 
-        var = match[1]
+        var = T.must(T.must(match)[1])
 
-        if match[2]
-          instance_variable_set("@#{var}", val)
-          @forced_nils[T.must(var)] = val.nil?
+        if T.must(match)[2]
+          set_property(var, val)
+          @forced_nils[var] = val.nil?
         else
-          instance_variable_get("@#{var}")
+          get_property(var)
         end
       end
 
@@ -257,17 +260,30 @@ module ShopifyAPI
       def to_hash
         hash = {}
         instance_variables.each do |var|
-          next if [:"@original_state", :"@session", :"@client", :"@forced_nils", :"@errors"].include?(var)
+          next if [
+            :"@original_state",
+            :"@session",
+            :"@client",
+            :"@forced_nils",
+            :"@errors",
+            :"@aliased_properties",
+          ].include?(var)
 
-          attribute = var.to_s.delete("@").to_sym
+          var = var.to_s.delete("@")
+          attribute = if @aliased_properties.value?(var)
+            T.must(@aliased_properties.key(var))
+          else
+            var
+          end.to_sym
+
           if self.class.has_many?(attribute)
-            hash[attribute.to_s] = instance_variable_get(var).map(&:to_hash).to_a if instance_variable_get(var)
+            hash[attribute.to_s] = get_property(attribute).map(&:to_hash).to_a if get_property(attribute)
           elsif self.class.has_one?(attribute)
-            element_hash = instance_variable_get(var)&.to_hash
+            element_hash = get_property(attribute)&.to_hash
             hash[attribute.to_s] = element_hash if element_hash || @forced_nils[attribute.to_s]
-          elsif !instance_variable_get(var).nil? || @forced_nils[attribute.to_s]
+          elsif !get_property(attribute).nil? || @forced_nils[attribute.to_s]
             hash[attribute.to_s] =
-              instance_variable_get(var)
+              get_property(attribute)
           end
         end
         hash
@@ -311,6 +327,23 @@ module ShopifyAPI
       rescue ShopifyAPI::Errors::HttpResponseError => e
         @errors.errors << e
         raise
+      end
+
+      private
+
+      sig { params(var: T.any(String, Symbol), val: T.untyped).void }
+      def set_property(var, val)
+        clean = var.to_s.gsub(/[\?\s]/, "")
+        @aliased_properties[var.to_s] = clean if clean != var
+
+        instance_variable_set("@#{clean}", val)
+      end
+
+      sig { params(var: T.any(String, Symbol)).returns(T.untyped) }
+      def get_property(var)
+        clean = @aliased_properties.key?(var.to_s) ? @aliased_properties[var.to_s] : var
+
+        instance_variable_get("@#{clean}")
       end
     end
   end
