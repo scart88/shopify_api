@@ -15,7 +15,6 @@ module ShopifyAPI
       @has_many = T.let({}, T::Hash[Symbol, Class])
       @paths = T.let([], T::Array[T::Hash[Symbol, T.any(T::Array[Symbol], String, Symbol)]])
       @custom_prefix = T.let(nil, T.nilable(String))
-
       @aliased_properties = T.let({}, T::Hash[String, String])
 
       sig { returns(T::Hash[Symbol, T.untyped]) }
@@ -331,19 +330,23 @@ module ShopifyAPI
 
       private
 
-      sig { params(var: T.any(String, Symbol), val: T.untyped).void }
-      def set_property(var, val)
-        clean = var.to_s.gsub(/[\?\s]/, "")
-        @aliased_properties[var.to_s] = clean if clean != var
+      sig { params(key: T.any(String, Symbol), val: T.untyped).void }
+      def set_property(key, val)
+        # Some API fields contain invalid characters, like `?`, which causes issues when setting them as instance
+        # variables. To work around that, we're cleaning them up here but keeping track of the properties that were
+        # aliased this way. When loading up the property, we can map back from the "invalid" field so that it is
+        # transparent to outside callers
+        clean_key = key.to_s.gsub(/[\?\s]/, "")
+        @aliased_properties[key.to_s] = clean_key if clean_key != key
 
-        instance_variable_set("@#{clean}", val)
+        instance_variable_set("@#{clean_key}", val)
       end
 
-      sig { params(var: T.any(String, Symbol)).returns(T.untyped) }
-      def get_property(var)
-        clean = @aliased_properties.key?(var.to_s) ? @aliased_properties[var.to_s] : var
+      sig { params(key: T.any(String, Symbol)).returns(T.untyped) }
+      def get_property(key)
+        clean_key = @aliased_properties.key?(key.to_s) ? @aliased_properties[key.to_s] : key
 
-        instance_variable_get("@#{clean}")
+        instance_variable_get("@#{clean_key}")
       end
     end
   end
